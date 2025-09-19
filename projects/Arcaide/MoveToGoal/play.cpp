@@ -42,8 +42,8 @@ VectorXf softmax(const VectorXf& z){
 // Static scene configuration
 struct EnvConfig {
     // window
-    int screenW = 800;
-    int screenH = 450;
+    int screenW = 1280;
+    int screenH = 720;
     // target
     int targetW = 20;
     // player
@@ -73,10 +73,18 @@ struct Env {
     int scorePlayer{0};
     int scoreAgent{0};
     
+    void init(){
+        uniform_real_distribution<float> distX(40.0f, cfg.screenW - 40.0f);
+        targetX = distX(rng);
+        playerX = distX(rng);
+        player2X = distX(rng);
+    }
+
+
     void reset(){
         uniform_real_distribution<float> distX(40.0f, cfg.screenW - 40.0f);
         targetX = distX(rng);
-        //playerX = (float)getRandomInt(cfg.playerW, cfg.screenW);
+        
         done = false;
         steps = 0;
     }
@@ -164,7 +172,6 @@ struct PolicyMLP {
         b2 = VectorXf::Zero(out);
     }
 
-
     // Forward pass of a simple 2-layer neural network
     // Input:  x (input vector)
     // Output: h (hidden activations), logits (unnormalized scores), probs (softmax probabilities)
@@ -221,11 +228,23 @@ int manualControl(Env& env){
     return action;
 }
 
+void drawGlowSprite(const Texture2D& glowSprite, const Rectangle& rect, float& destW, const float& destH, Color glowColor){
+    DrawTexturePro(
+        glowSprite,
+        (Rectangle){ 0.0f, 0.0f, (float)glowSprite.width, (float)glowSprite.height }, // source rect
+        (Rectangle){ rect.x, rect.height+100, destW, destH}, // dest rect
+        (Vector2){ destW/2.0f, destH/2.0f }, // origin (center)
+        0.0f, // rotation
+        glowColor
+    );
+}
+
+
 int main(){
     // === Initialization ===
     EnvConfig cfg;
     Env env{cfg};
-    env.reset();
+    env.init();
 
     PolicyMLP pol;          // Agent policy network
 
@@ -234,8 +253,12 @@ int main(){
     int a1{0}, a2{0};                              // Action
     std::vector<Transition> traj;          // Episode trajectory (for REINFORCE)
 
+    Texture2D glowSpriteRed = LoadTexture("./assets/glow_light_red.png");
+    Texture2D glowSpriteWhite = LoadTexture("./assets/glow_white.png");
+
     // === Main Loop ===
     while (!WindowShouldClose()){
+        int fps = GetFPS();
         float dt = GetFrameTime();
 
         // --- Load the Model ---
@@ -265,34 +288,38 @@ int main(){
 
         // --- Rendering ---
         BeginDrawing();
-        ClearBackground(LIGHTBLACK);
+        ClearBackground(BLACK);
 
         // UI overlays
-        //float dist = std::fabs(env.playerX - env.targetX);
-        //DrawText(TextFormat("steps: %d/%d", (int)env.steps, cfg.maxSteps), 10, 64, 18, RED);
-        //DrawText(TextFormat("dist: %.1f", dist), 10, 86, 18, RED);
-        DrawText(TextFormat("Player: %d", env.scorePlayer), 10, 20, 18, RED);
-        DrawText(TextFormat("Smith: %d", env.scoreAgent), cfg.screenW - 200, 20, 18, RED);
+        DrawText(TextFormat("fps: %d", fps), cfg.screenW - 50, 5, 9, LIGHTGRAY);
+        DrawText(TextFormat("PLAYER: %d", env.scorePlayer), 10, 20, 18, RED);
+        DrawText(TextFormat("SMITH  : %d", env.scoreAgent), 10, 40, 18, RED);
+        DrawText("\xC2\xA9 2025 ARCAIDE STUDIO", cfg.screenW / 2 - 110, cfg.screenH - 50, 18, RED);
+        DrawLine(cfg.screenW/2, 0.f, cfg.screenW/2, cfg.screenH, WHITE);
         
-        /*
-        int bx = cfg.screenW - 200; int by = 20; int bw = 24; int gap = 6;
-        DrawText("pi(a/s):", bx, by, 20, DARKGRAY);
-        const char* labels[3] = {"LEFT", "IDLE", "RIGHT"};
-        for(int i=0; i < 3; ++i){
-            int hbar = (int)(probs[i] * 100); //Calculates the horizontal width of each bar
-            DrawRectangle(bx, by+30+i*(bw+gap), hbar, bw, i==a2? GRAY: DARKGRAY); //Draws a rectangle at position
-            DrawText(TextFormat("%s %.2f", labels[i], probs[i]), bx + hbar + 8, by+30+i*(bw+gap)+4, 18, DARKGRAY); // Draws text showing the label and probability value
-        }
-        */
-
+        // Display agent policy
+        // int bx = cfg.screenW - 200; int by = 20; int bw = 24; int gap = 6;
+        // DrawText("pi(a/s):", bx, by, 20, DARKGRAY);
+        // const char* labels[3] = {"LEFT", "IDLE", "RIGHT"};
+        // for(int i=0; i < 3; ++i){
+        //     int hbar = (int)(probs[i] * 100); //Calculates the horizontal width of each bar
+        //     DrawRectangle(bx, by+30+i*(bw+gap), hbar, bw, i==a2? GRAY: DARKGRAY); //Draws a rectangle at position
+        //     DrawText(TextFormat("%s %.2f", labels[i], probs[i]), bx + hbar + 8, by+30+i*(bw+gap)+4, 18, DARKGRAY); // Draws text showing the label and probability value
+        // }
+        
         // Scene rendering
-        DrawLine(0, cfg.screenH/2, cfg.screenW, cfg.screenH/2, LIGHTGRAY);
-        DrawRectangle((int)env.playerX, cfg.screenH/2 - cfg.targetW/2, cfg.playerW, cfg.targetW, DARKBLUE);
-        DrawRectangle((int)env.targetX, cfg.screenH/2 - cfg.targetW/2, cfg.targetW, cfg.targetW, RED);
-
-        DrawLine(0, cfg.screenH/2 + 100, cfg.screenW, cfg.screenH/2 + 100, LIGHTGRAY);
-        DrawRectangle((int)env.player2X, cfg.screenH/2 - cfg.targetW/2 + 100, cfg.playerW, cfg.targetW, DARKPURPLE);
-        DrawRectangle((int)env.targetX, cfg.screenH/2 - cfg.targetW/2 + 100, cfg.targetW, cfg.targetW, RED);
+        //DrawLine(0, cfg.screenH/2, cfg.screenW, cfg.screenH/2, LIGHTGRAY);
+        BeginBlendMode(BLEND_ADDITIVE);
+        float scale = 12.0f;
+        float destW = (float)cfg.targetW * scale;
+        float destH = (float)cfg.targetW * scale;
+        Rectangle rectAgent = {(float)env.playerX, (float)cfg.screenH/2, destW, destH};
+        Rectangle rectPlayer = {(float)env.player2X, (float)cfg.screenH/2, destW, destH};
+        Rectangle rectTarget = {(float)env.targetX, (float)cfg.screenH/2, destW, destH};
+        drawGlowSprite(glowSpriteRed, rectTarget, destW, destH, RED);
+        drawGlowSprite(glowSpriteWhite, rectAgent, destW, destH, WHITE);
+        drawGlowSprite(glowSpriteWhite, rectPlayer, destW, destH, WHITE);       
+        EndBlendMode();
 
         EndDrawing();
         env.steps += dt;
@@ -300,6 +327,8 @@ int main(){
     }
 
     // === Cleanup ===
+    UnloadTexture(glowSpriteRed);
+    UnloadTexture(glowSpriteWhite);
     CloseWindow();
     return 0;
 }
