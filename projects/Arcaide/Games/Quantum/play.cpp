@@ -20,7 +20,7 @@
 #include <cmath>
 #include <fstream>
 #include <random>
-#include "../../../src/external/eigen/Eigen/Dense"
+#include "../../../../src/external/eigen/Eigen/Dense"
 
 using Eigen::MatrixXf; using Eigen::VectorXf;
 using namespace std;
@@ -295,7 +295,7 @@ int main(){
         DrawText(TextFormat("PLAYER: %d", env.scorePlayer), 10, 20, 18, RED);
         DrawText(TextFormat("SMITH  : %d", env.scoreAgent), 10, 40, 18, RED);
         DrawText("\xC2\xA9 2025 ARCAIDE STUDIO", cfg.screenW / 2 - 110, cfg.screenH - 50, 18, RED);
-        DrawLine(cfg.screenW/2, 0.f, cfg.screenW/2, cfg.screenH, WHITE);
+        //DrawLine(cfg.screenW/2, 0.f, cfg.screenW/2, cfg.screenH, WHITE);
         
         // Display agent policy
         // int bx = cfg.screenW - 200; int by = 20; int bw = 24; int gap = 6;

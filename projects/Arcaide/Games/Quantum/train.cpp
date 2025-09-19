@@ -20,7 +20,7 @@
 #include <cmath>
 #include <fstream>
 #include <random>
-#include "../../../src/external/eigen/Eigen/Dense"
+#include "../../../../src/external/eigen/Eigen/Dense"
 
 using Eigen::MatrixXf; using Eigen::VectorXf;
 using namespace std;
