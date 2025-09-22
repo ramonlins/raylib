@@ -30,16 +30,18 @@
 using namespace std;
 
 #define UI_COLOR RED
-#define WIDTH 1280
-#define HEIGHT 720
-#define OFFSET 60
+#define WIDTH 1920 //1920 FHD
+#define HEIGHT 1080 // 1080 FHD
+#define OFFSET 120
 #define EDGE_0FFSET 10
 #define QUASAR_W 20
-#define SPIKE_W 10
+#define SPIKE_W 15
 #define POSITRON_W 20
-#define SPIKES_MAX 50
-#define SCREEN_OFFSET_TOP 80
-#define SCREEN_OFFSET_BOT 80
+#define SPIKES_MAX 100
+#define SCREEN_OFFSET_TOP 100
+#define SCREEN_OFFSET_BOT 100
+#define VISUAL_SCALE 10.0f
+#define TEXT_SPACE 20   // vertical space between lines
 
 enum Action {
     HOLD,
@@ -62,10 +64,10 @@ struct Policy {
     }
 
     int imitationAction(){
-        bool left = IsKeyDown(KEY_A);
-        bool right = IsKeyDown(KEY_D);
-        bool up = IsKeyDown(KEY_W);
-        bool down = IsKeyDown(KEY_S);
+        bool left = IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT);
+        bool right = IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT);
+        bool up = IsKeyDown(KEY_W) || IsKeyDown(KEY_UP);
+        bool down = IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN);
         
         if (left && up) return LEFT_UP;
         if (right && up) return RIGHT_UP;
@@ -94,6 +96,7 @@ struct Env {
         float w{POSITRON_W};
         float h{POSITRON_W};
 
+        Texture2D texture{};
     };
 
     struct Agent {
@@ -105,6 +108,8 @@ struct Env {
         float h{QUASAR_W};
 
         int score {0};
+
+        Texture2D texture{};
     };
 
     struct Spike {
@@ -121,10 +126,13 @@ struct Env {
     GameState gameState;
     Spike spikes[SPIKES_MAX] = {0};
 
+    Texture2D spikeTexture{};
+
     bool isManual{false};
     bool isTraining{true};
     bool isSpikeStable{false};
     float elapsedTime{0.f};
+    float spriteScale{120.0f};
 
     void initGame(void){
         agent.x = GetRandomValue(SCREEN_OFFSET_TOP, WIDTH);
@@ -140,6 +148,18 @@ struct Env {
         }
     }
 
+    void loadTextures() {
+        agent.texture = LoadTexture("./assets/glow_white.png");
+        target.texture = LoadTexture("./assets/glow_red.png");
+        spikeTexture = LoadTexture("./assets/glow_light_red.png");
+    }
+
+    void unloadTextures() {
+        UnloadTexture(agent.texture);
+        UnloadTexture(target.texture);
+        UnloadTexture(spikeTexture);
+    }
+    
     //TODO: Need to add diagonal actions
     void step(int a, float dt){
         switch (a)
@@ -188,36 +208,92 @@ struct Env {
 static Env env;
 static Policy pol;
 
+void DrawSprite(const Texture2D& textureSprite, Rectangle& sourceRect, Rectangle& destRect, Vector2 origin, Color color){
+    DrawTexturePro(
+        textureSprite,
+        sourceRect,
+        destRect,
+        origin,
+        0.f,
+        color 
+    );
+}
+
+
 void DrawFrame(){
     
     BeginDrawing();
-    
+        
         ClearBackground(BLACK);
-        // UI
-        DrawText(env.isManual ? "MANUAL" : "AUTO", 140, 10, 20, env.isManual ? ORANGE : DARKGRAY);
-        DrawText(env.isTraining ? "TRAIN" : "EVAL", 240, 10, 20, env.isTraining ? ORANGE : DARKGRAY);
-        DrawText("M: toggle manual | T: toggle training | F: enable/disable fps | R: reset | S: save | L: load | ESC: quit", EDGE_0FFSET, HEIGHT-40, 10, DARKGRAY);
+        // UI TOP
+        DrawText(env.isManual ? "MANUAL" : "AUTO", 140, 10, 15, env.isManual ? LIGHTGRAY : DARKGRAY);
+        DrawText(env.isTraining ? "TRAIN" : "EVAL", 240, 10, 15, env.isTraining ? LIGHTGRAY : DARKGRAY);
         DrawText(TextFormat("TIME: %.2f", env.elapsedTime), EDGE_0FFSET, EDGE_0FFSET, 15, UI_COLOR);
         DrawText(TextFormat("SCORE: %d", env.agent.score), EDGE_0FFSET, EDGE_0FFSET+20, 15, UI_COLOR);
         DrawText(TextFormat("MAX SCORE: %d", 1000), WIDTH/2 - OFFSET, EDGE_0FFSET, 15, UI_COLOR);
-
         if(env.gameState.isShowFPS) DrawText(TextFormat("FPS: %d", GetFPS()), WIDTH-EDGE_0FFSET-70, EDGE_0FFSET, 15, UI_COLOR);
+        // UI DOWN
+        DrawText("M: toggle manual | T: toggle training | F: enable/disable fps | R: reset | S: save | L: load | ESC: quit", EDGE_0FFSET, HEIGHT-40, 10, DARKGRAY);
+        DrawText("Objective: Stabilize the Quantum Field", WIDTH/1.6, HEIGHT-SCREEN_OFFSET_TOP+50, 10, DARKGRAY);
+        DrawText("Controls: Arrow Keys / WASD to move in all directions", WIDTH/1.6, HEIGHT-SCREEN_OFFSET_TOP+60, 10, DARKGRAY);
+        DrawText("Hint: Diagonal movement is faster", WIDTH/1.6, HEIGHT-SCREEN_OFFSET_TOP+70, 10, DARKGRAY);
+        DrawText("Rules:", WIDTH/1.2, HEIGHT-SCREEN_OFFSET_TOP+50, 10, DARKGRAY);
+        DrawText("- Collect RED energy (core for stabilization)",WIDTH/1.2 , HEIGHT-SCREEN_OFFSET_TOP+60, 10, DARKGRAY);
+        DrawText("- Avoid PURPLE SPIKES (they destroy energy)",WIDTH/1.2 , HEIGHT-SCREEN_OFFSET_TOP+70, 10, DARKGRAY);
+        DrawText("- Balance movement to keep control of the field",WIDTH/1.2 , HEIGHT-SCREEN_OFFSET_TOP+80, 10, DARKGRAY);
+        DrawText("\xC2\xA9 ARCAIDE", WIDTH/2 - SCREEN_OFFSET_TOP, HEIGHT-SCREEN_OFFSET_TOP+50, 20, UI_COLOR);        
+        
+        
+        // Entities
+        BeginBlendMode(BLEND_ADDITIVE);
+        
+            Rectangle agentRectSprite = {0.f, 0.f, (float)env.agent.texture.width, (float)env.agent.texture.height};
+            Rectangle agentRect = {
+                env.agent.x - (env.agent.w * (VISUAL_SCALE - 1) / 2),  // Center the scaled sprite
+                env.agent.y - (env.agent.h * (VISUAL_SCALE - 1) / 2),
+                env.agent.w * VISUAL_SCALE, 
+                env.agent.h * VISUAL_SCALE
+            };        
+            Rectangle targetRectSprite = {0.f, 0.f, (float)env.target.texture.width, (float)env.target.texture.height};
+            Rectangle targetRect = {
+                env.target.x - (env.target.w * (VISUAL_SCALE - 1) / 2),  // Center the scaled sprite
+                env.target.y - (env.target.h * (VISUAL_SCALE - 1) / 2),
+                env.target.w * VISUAL_SCALE, 
+                env.target.h * VISUAL_SCALE
+            };
+            
+            Vector2 agentRectCenter = {env.agent.w/2, env.agent.h/2};
+            Vector2 targetRectCenter = {env.target.w/2, env.target.h/2};
+            
+            DrawSprite(env.agent.texture, agentRectSprite, agentRect, agentRectCenter, WHITE);
+            DrawSprite(env.target.texture, targetRectSprite, targetRect, targetRectCenter, RED);
 
-        DrawText("\xC2\xA9 ARCAIDE", WIDTH/2 - OFFSET, HEIGHT-50, 20, UI_COLOR);
-        DrawRectangle(env.agent.x, env.agent.y, env.agent.w, env.agent.h, WHITE);
-        DrawRectangle(env.target.x, env.target.y, env.target.w, env.target.h, RED);
-        // NOTE: How to draw the positrons ("Meteors")
-        for(const auto& spike: env.spikes){
-            DrawRectangle(spike.x, spike.y, spike.w, spike.h, VIOLET);    
-        }
+            //DrawRectangle(env.agent.x, env.agent.y, env.agent.w, env.agent.h, WHITE);
+            //DrawRectangle(env.target.x, env.target.y, env.target.w, env.target.h, RED);
 
+            Rectangle spikeRectSprite = {0.f, 0.f, (float)env.spikeTexture.width, (float)env.spikeTexture.height};
+                for(const auto& spike: env.spikes){
+                    Rectangle spikeRect = {
+                        spike.x - (spike.w * (VISUAL_SCALE - 1) / 2),  // Center the scaled sprite
+                        spike.y - (spike.h * (VISUAL_SCALE - 1) / 2),
+                        spike.w * VISUAL_SCALE, 
+                        spike.h * VISUAL_SCALE
+                    };
+                    Vector2 spikeRectCenter = {spike.w/2, spike.h/2};
+                    DrawSprite(env.spikeTexture, spikeRectSprite, spikeRect, spikeRectCenter, PURPLE);
+                    //DrawRectangle(spike.x, spike.y, spike.w, spike.h, VIOLET);    
+                }
+
+        EndBlendMode();
         // NOTE: Guide center of screen (uncomment to debug)
-        DrawLine((WIDTH/2), 0, WIDTH/2, HEIGHT, LIGHTGRAY);
-        DrawLine(0, HEIGHT/2, WIDTH, HEIGHT/2, LIGHTGRAY);
-        DrawLine(0, SCREEN_OFFSET_TOP, WIDTH, SCREEN_OFFSET_TOP, LIGHTGRAY);
-        DrawLine(0, HEIGHT-SCREEN_OFFSET_BOT, WIDTH, HEIGHT-SCREEN_OFFSET_BOT, LIGHTGRAY);
+        //DrawLine((WIDTH/2), 0, WIDTH/2, HEIGHT, LIGHTGRAY);
+        //DrawLine(0, HEIGHT/2, WIDTH, HEIGHT/2, LIGHTGRAY);
+        //DrawLine(0, SCREEN_OFFSET_TOP, WIDTH, SCREEN_OFFSET_TOP, LIGHTGRAY);
+        //DrawLine(0, HEIGHT-SCREEN_OFFSET_BOT, WIDTH, HEIGHT-SCREEN_OFFSET_BOT, LIGHTGRAY);
 
-    EndDrawing();   
+        EndBlendMode();
+
+    EndDrawing();  
 }
 
 void Update(float dt){
@@ -294,16 +370,20 @@ void Update(float dt){
     DrawFrame();       
 }
 
-
 int main(void){
 
-    InitWindow(WIDTH, HEIGHT, "QUANTUM");    
-    env.initGame();
+    InitWindow(0, 0, "QUANTUM");
+    ToggleFullscreen();           // switch to fullscreen mode
 
+    env.initGame();
+    env.loadTextures();
+    
     while(!WindowShouldClose()){
         float dt = GetFrameTime();
         Update(dt);
     }
 
+    env.unloadTextures();
+    CloseWindow();
     return 0;
 }
