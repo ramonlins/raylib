@@ -1,396 +1,309 @@
-// =========================
-// FILE: main.cpp
-// Minimal DRL (REINFORCE) agent integrated with raylib using Eigen
-// Now supports manual control option to collect trajectories and train.
-// Keys:
-//   [M] toggle manual mode
-//   [T] toggle training on/off
-//   [R] reset episode
-//   [S] save model
-//   [L] load model
-//   [ESC] quit
-// Manual controls: [Left]/[Right] arrows to move
-// =========================
+/* Entities*/
+// Target
+// Player
+// Enemy
 
-#include <raylib.h>
-#include <vector>
-#include <iostream>
-#include <cstdlib>
-#include <ctime>
-#include <cmath>
-#include <fstream>
-#include <random>
-#include "../../../../src/external/eigen/Eigen/Dense"
+/* NNets*/
+// Architecture
+// Forward
+// Compute Error
+// Gradient
+// Update
 
-using Eigen::MatrixXf; using Eigen::VectorXf;
+/* RLearning*/
+// Markov Decision Process
+// Collect Sequences
+// Compute Return
+// Calculate Value or Gradient 
+// Update policy
+
+/* Game*/
+// InitWindow
+// InitGame
+// Update
+// DrawFrame
+// ReleaseGameObjects
+
+#include<raylib.h>
+#include<math.h>
+
 using namespace std;
 
-auto seed = random_device{}();
-static mt19937 rng{seed};
+#define UI_COLOR RED
+#define WIDTH 1280
+#define HEIGHT 720
+#define OFFSET 60
+#define EDGE_0FFSET 10
+#define QUASAR_W 20
+#define SPIKE_W 10
+#define POSITRON_W 20
+#define SPIKES_MAX 50
+#define SCREEN_OFFSET_TOP 80
+#define SCREEN_OFFSET_BOT 80
 
-#define LIGHTBLACK CLITERAL(Color) {20, 20, 20, 255}
-#define LIGHTBLUE GetColor(0X3A5FE5FF)
-
-inline float clampf(float value, float min, float max) {return value < min ? min: (value > max ? max : value);}
-
-VectorXf softmax(const VectorXf& z){
-    float m = z.maxCoeff();
-    VectorXf e = (z.array() - m).exp();
-    return e / e.sum();
-}
-
-// Static scene configuration
-struct EnvConfig {
-    // window
-    int screenW = 800;
-    int screenH = 450;
-    // target
-    int targetW = 20;
-    // player
-    int playerW = 20;
-    float speed = 200.0f;
-    // episodes
-    int maxSteps = 10; // 10 seconds
+enum Action {
+    HOLD,
+    LEFT,
+    RIGHT,
+    UP,
+    DOWN,
+    LEFT_UP,
+    RIGHT_UP,
+    LEFT_DOWN,
+    RIGHT_DOWN,
+    ACTION_COUNT
 };
 
-struct Transition {
-    VectorXf s;      // State at time t
-    VectorXf logits; // Pre-softmax outputs (needed for gradient calculation)
-    VectorXf h;      // Hidden layer activations (needed for backprop to W1)
-    int a;           // Action taken
-    float r;         // Immediate reward
-    // Note: REINFORCE doesn't need next state s' since it uses full returns
+inline float clamp(float value, float min, float max) { return value < min ? min : (value > max ? max: value);}
+
+struct Policy {
+    int randomAction(){
+        return GetRandomValue(0, ACTION_COUNT);
+    }
+
+    int imitationAction(){
+        bool left = IsKeyDown(KEY_A);
+        bool right = IsKeyDown(KEY_D);
+        bool up = IsKeyDown(KEY_W);
+        bool down = IsKeyDown(KEY_S);
+        
+        if (left && up) return LEFT_UP;
+        if (right && up) return RIGHT_UP;
+        if (left && down) return LEFT_DOWN;
+        if (right && down) return RIGHT_DOWN;
+        
+        if (left) return LEFT;
+        if (right) return RIGHT;
+        if (up) return UP;
+        if (down) return DOWN;
+        return HOLD;
+    }
 };
 
 struct Env {
-    EnvConfig cfg;
+    struct GameState {
+        bool isShowFPS{true};
+        //NOTE: Will add more buttons
+    };
 
-    float targetX{0};
-    float playerX{0};
-    float steps{0};
-    bool done{false};
+    struct Target {
+        float x{0.f};
+        float y{0.f};
+        float speed{10.f};
+
+        float w{POSITRON_W};
+        float h{POSITRON_W};
+
+    };
+
+    struct Agent {
+        float x{0.f};
+        float y{0.f};
+        float speed{200.f};
+
+        float w{QUASAR_W};
+        float h{QUASAR_W};
+
+        int score {0};
+    };
+
+    struct Spike {
+        float x{0.f};
+        float y{0.f};
+        float angle{0.f};
+        float speed{50.f};
+        float w{SPIKE_W};
+        float h{SPIKE_W};
+    };
+
+    Agent agent;
+    Target target;
+    GameState gameState;
+    Spike spikes[SPIKES_MAX] = {0};
+
+    bool isManual{false};
+    bool isTraining{true};
+    bool isSpikeStable{false};
+    float elapsedTime{0.f};
+
+    void initGame(void){
+        agent.x = GetRandomValue(SCREEN_OFFSET_TOP, WIDTH);
+        agent.y = GetRandomValue(SCREEN_OFFSET_TOP, HEIGHT - SCREEN_OFFSET_BOT);
+
+        target.x = GetRandomValue(SCREEN_OFFSET_TOP, WIDTH);
+        target.y = GetRandomValue(SCREEN_OFFSET_TOP, HEIGHT - SCREEN_OFFSET_BOT);
+
+        for(int i = 0; i < SPIKES_MAX; i++){
+            spikes[i].x = GetRandomValue(0, WIDTH);
+            spikes[i].y = GetRandomValue(0, HEIGHT);
+            spikes[i].angle = GetRandomValue(0, 360) * DEG2RAD;
+        }
+    }
+
+    //TODO: Need to add diagonal actions
+    void step(int a, float dt){
+        switch (a)
+        {
+        case LEFT:
+            agent.x -= agent.speed * dt;
+            break;
+        case RIGHT:
+            agent.x += agent.speed * dt;
+            break;
+        case UP:
+            agent.y -= agent.speed * dt;
+            break;
+        case DOWN:
+            agent.y += agent.speed * dt;
+            break;
+        case LEFT_UP:
+            agent.x -= agent.speed * dt;
+            agent.y -= agent.speed * dt;
+            break;
+        case RIGHT_UP:
+            agent.x += agent.speed * dt;
+            agent.y -= agent.speed * dt;
+            break;
+        case LEFT_DOWN:
+            agent.x -= agent.speed * dt;
+            agent.y += agent.speed * dt;
+            break;
+        case RIGHT_DOWN:
+            agent.x += agent.speed * dt;
+            agent.y += agent.speed * dt;
+            break;
+        case HOLD:    
+        default:
+            break;
+        }    
+    }
 
     void reset(){
-        uniform_real_distribution<float> distX(40.0f, cfg.screenW - 40.0f);
-        targetX = distX(rng);
-        //playerX = (float)getRandomInt(cfg.playerW, cfg.screenW);
-        done = false;
-        steps = 0;
-    }
-
-    VectorXf observe() const{
-        float dist = playerX - targetX;
-
-        VectorXf s(3);
-        float npx = (playerX / cfg.screenW) * 2.f - 1.f;
-        float ntx = (targetX / cfg.screenW) * 2.f - 1.f;
-        float dx =  dist / (cfg.screenW * 0.5f);
-
-        s << npx, ntx, dx;
-        return s;
-    }
-
-    tuple<float, bool> step(int action){
-        float dt = GetFrameTime();
-        float reward{0.f};
-        if (action == 0) playerX -= cfg.speed * dt;
-        else if (action == 2) playerX += cfg.speed * dt;
-        playerX = clampf(playerX, 0.f, (float)cfg.screenW - cfg.targetW);
-        steps += dt;
-        float dist = fabs(playerX - targetX);
-        bool done = false;
-        if (dist <= cfg.targetW) {
-            reward = 1.0f;
-            done = true;
-        } else if (steps >= cfg.maxSteps) {
-            reward = -0.1f; // Small penalty for timeout
-            done = true;
-        } else {
-            reward = -(dist / cfg.screenW) * 0.99f;
-        }
-
-        return {reward, done};
+        initGame();
+        agent.score = 0;
+        isSpikeStable = true;
     }
 };
 
-struct PolicyMLP {
-    int in{3}, hid{32}, out{3};
-    MatrixXf W1; VectorXf b1;
-    MatrixXf W2; VectorXf b2;
-    float lr{1e-4f};
+static Env env;
+static Policy pol;
 
-    // Constructor: initialize policy network parameters
-    PolicyMLP() {
-        // Normal distribution for weight initialization (mean = 0, std = 0.1)
-        std::normal_distribution<float> nd(0.f, 0.1f);
+void DrawFrame(){
+    
+    BeginDrawing();
+    
+        ClearBackground(BLACK);
+        // UI
+        DrawText(env.isManual ? "MANUAL" : "AUTO", 140, 10, 20, env.isManual ? ORANGE : DARKGRAY);
+        DrawText(env.isTraining ? "TRAIN" : "EVAL", 240, 10, 20, env.isTraining ? ORANGE : DARKGRAY);
+        DrawText("M: toggle manual | T: toggle training | F: enable/disable fps | R: reset | S: save | L: load | ESC: quit", EDGE_0FFSET, HEIGHT-40, 10, DARKGRAY);
+        DrawText(TextFormat("TIME: %.2f", env.elapsedTime), EDGE_0FFSET, EDGE_0FFSET, 15, UI_COLOR);
+        DrawText(TextFormat("SCORE: %d", env.agent.score), EDGE_0FFSET, EDGE_0FFSET+20, 15, UI_COLOR);
+        DrawText(TextFormat("MAX SCORE: %d", 1000), WIDTH/2 - OFFSET, EDGE_0FFSET, 15, UI_COLOR);
 
-        // First layer weights: (hid × in), initialized with random values
-        W1 = MatrixXf(hid, in).unaryExpr([&](float){ return nd(rng); });
+        if(env.gameState.isShowFPS) DrawText(TextFormat("FPS: %d", GetFPS()), WIDTH-EDGE_0FFSET-70, EDGE_0FFSET, 15, UI_COLOR);
 
-        // First layer bias: initialized to zeros (hid × 1)
-        b1 = VectorXf::Zero(hid);
-
-        // Second layer weights: (out × hid), initialized with random values
-        W2 = MatrixXf(out, hid).unaryExpr([&](float){ return nd(rng); });
-
-        // Second layer bias: initialized to zeros (out × 1)
-        b2 = VectorXf::Zero(out);
-    }
-
-
-    // Forward pass of a simple 2-layer neural network
-    // Input:  x (input vector)
-    // Output: h (hidden activations), logits (unnormalized scores), probs (softmax probabilities)
-    void forward(const VectorXf x, VectorXf& h, VectorXf& logits, VectorXf& probs) const {
-        // Computation flow:
-        //   x → [W1, b1, ReLU] → h → [W2, b2] → logits → [softmax] → probs
-
-        // Hidden layer: linear transformation + ReLU activation
-        // Dimensions: (32×3) * (3×1) + (32×1) → (32×1)
-        h = (W1 * x + b1).array().max(0.f);
-
-        // Output layer (logits before softmax)
-        // Dimensions: (3×32) * (32×1) + (3×1) → (3×1)
-        logits = W2 * h + b2;
-
-        // Softmax activation: converts logits into probability distribution
-        probs = softmax(logits);
-    }
-
-
-    // Sample action stochastically from probability distribution
-    // This implements exploration: even low-probability actions can be chosen
-    int sampleAction(const VectorXf& probs){
-        // Create discrete distribution where each action's probability
-        // determines how likely it is to be sampled
-        // e.g., probs=[0.1, 0.3, 0.6] → action 2 chosen 60% of the time
-        std::discrete_distribution<int> dd(probs.data(), probs.data()+probs.size());
-        return dd(rng);  // Sample: returns 0, 1, or 2 based on probabilities
-    }
-
-    int update(const vector<Transition>& traj, float gamma=0.99f) {
-        // ============================================================
-        // Step 1: Compute discounted returns (Monte Carlo estimate)
-        // ------------------------------------------------------------
-        // Returns are calculated backwards:
-        //   G[t] = r[t] + γ * G[t+1]
-        // This gives the total future reward from timestep t onward.
-        // ============================================================
-        vector<float> G(traj.size());
-        float g = 0.f;
-        for (int t = (int)traj.size()-1; t >= 0; --t) {
-            g = traj[t].r + gamma * g;
-            G[t] = g;
+        DrawText("\xC2\xA9 ARCAIDE", WIDTH/2 - OFFSET, HEIGHT-50, 20, UI_COLOR);
+        DrawRectangle(env.agent.x, env.agent.y, env.agent.w, env.agent.h, WHITE);
+        DrawRectangle(env.target.x, env.target.y, env.target.w, env.target.h, RED);
+        // NOTE: How to draw the positrons ("Meteors")
+        for(const auto& spike: env.spikes){
+            DrawRectangle(spike.x, spike.y, spike.w, spike.h, VIOLET);    
         }
 
-        // ============================================================
-        // Step 2: Normalize returns (variance reduction)
-        // ------------------------------------------------------------
-        // Normalization creates a baseline effect:
-        //   - actions better than average → positive advantage
-        //   - actions worse than average → negative advantage
-        // This reduces variance in policy gradient updates.
-        // ============================================================
-        float mean = 0.f, sq = 0.f;
-        for (float v : G) {
-            mean += v;
-            sq   += v*v;
-        }
-        mean /= G.size();
-        float var = sq/G.size() - mean*mean;       // Var[X] = E[X²] - (E[X])²
-        var = max(1e-8f, var);                     // avoid divide-by-zero
-        float std = sqrt(var);
+        // NOTE: Guide center of screen (uncomment to debug)
+        DrawLine((WIDTH/2), 0, WIDTH/2, HEIGHT, LIGHTGRAY);
+        DrawLine(0, HEIGHT/2, WIDTH, HEIGHT/2, LIGHTGRAY);
+        DrawLine(0, SCREEN_OFFSET_TOP, WIDTH, SCREEN_OFFSET_TOP, LIGHTGRAY);
+        DrawLine(0, HEIGHT-SCREEN_OFFSET_BOT, WIDTH, HEIGHT-SCREEN_OFFSET_BOT, LIGHTGRAY);
 
-        for (float& v : G) {
-            v = (v - mean) / (std + 1e-8f);
-        }
-
-        /* ============================================================
-        Step 3: Compute gradients (REINFORCE rule)
-        ------------------------------------------------------------
-        Gradient estimate:
-            ∇J(θ) ≈ Σ_t [ ∇ log π(a_t | s_t; θ) * G[t] ]
-
-        Backpropagation through the 2-layer network:
-        ∂loss/∂probs → ∂loss/∂logits → ∂loss/∂W2,b2 → ∂loss/∂W1,b1 → ∂loss/∂v1 → ∂loss/∂h → (apply ReLU derivative)
-
-        More precisely:
-            ∂loss/∂logits = (onehot - probs) * G[t] (softmax+cross-entropy derivative)
-            ∂loss/∂W2 = ∂loss/∂logits * h^T (chain rule)
-            ∂loss/∂b2 = ∂loss/∂logits (bias gradient)
-            ∂loss/∂h = W2^T * ∂loss/∂logits (backprop through W2)
-            ∂loss/∂v1 = ∂loss/∂h ⊙ ReLU'(v1) (element-wise, ReLU derivative)
-            ∂loss/∂W1 = ∂loss/∂v1 * input^T (chain rule)
-            ∂loss/∂b1 = ∂loss/∂v1 (bias gradient)
-        // ============================================================ */
-
-        MatrixXf dW2 = MatrixXf::Zero(W2.rows(), W2.cols());
-        VectorXf db2 = VectorXf::Zero(b2.size());
-        MatrixXf dW1 = MatrixXf::Zero(W1.rows(), W1.cols());
-        VectorXf db1 = VectorXf::Zero(b1.size());
-
-        // Softmax derivative simplifies nicely:
-        //   ∂L/∂logits = (onehot - probs) * G[t]
-        // This comes from combining softmax + cross-entropy.
-        for (size_t t = 0; t < traj.size(); t++) {
-            const auto& tr = traj[t];
-
-            // --- Output layer ---
-            VectorXf probs = softmax(tr.logits);
-            VectorXf onehot = VectorXf::Zero(probs.size());
-            onehot[tr.a] = 1.f;
-
-            // δ2 = ∂Loss/∂logits (scaled by return G[t])
-            VectorXf grad_logits = (onehot - probs) * G[t];
-
-            // Accumulate gradients for W2, b2
-            dW2 += grad_logits * tr.h.transpose();
-            db2 += grad_logits;
-
-            // --- Hidden layer ---
-            // Backprop: δh = (W2^T * δ2) ∘ ReLU′(h_pre)
-            VectorXf dh = W2.transpose() * grad_logits;
-            VectorXf relu_mask = tr.h.unaryExpr([](float v){ return v > 0.f ? 1.f : 0.f; });
-            dh = dh.cwiseProduct(relu_mask);
-
-            // Accumulate gradients for W1, b1
-            dW1 += dh * tr.s.transpose();
-            db1 += dh;
-        }
-
-        // ============================================================
-        // Step 4: Gradient ascent update
-        // ------------------------------------------------------------
-        // θ ← θ + α * ∇J(θ)
-        // Note: using += because we *maximize* reward
-        // ============================================================
-        W2 += lr * dW2;  b2 += lr * db2;
-        W1 += lr * dW1;  b1 += lr * db1;
-
-        return 0;
-
-    }
-
-    bool save(const string& path){
-        ofstream f(path, ios::binary);
-        if(!f) return false;
-        auto dumpM = [&](const auto& M){f.write((const char*)M.data(), sizeof(float) * M.size());};
-        dumpM(W1); dumpM(b1); dumpM(W2); dumpM(b2);
-        return true; 
-    }
-
-
-    bool load(const string& path){
-        ifstream f(path, ios::binary);  // binary mode
-        if (!f) return false;
-        auto loadM = [&](auto& M) {f.read((char*)M.data(), sizeof(float) * M.size());};
-        loadM(W1); loadM(b1); loadM(W2); loadM(b2); 
-        return true;
-    }
-
-};
-
-bool isCollision(int playerX, int targetX, const EnvConfig& cfg){
-    int playerRightEdge = playerX + cfg.playerW;
-    int targetRightEdge = targetX + cfg.targetW;
-
-    if ((playerRightEdge > targetX) && (playerX < targetRightEdge )) return true;
-    return false;
+    EndDrawing();   
 }
 
-int manualControl(Env& env){
-    int action;
-    if (IsKeyDown(KEY_A)) action = 0;
-    else if (IsKeyDown(KEY_D)) action = 2;
-    else action = 1;
-    return action;
-}
+void Update(float dt){
+    int a{0};
+    env.elapsedTime+=dt;
 
-int main(){
-    // === Initialization ===
-    EnvConfig cfg;
-    Env env{cfg};
-    env.reset();
+    // Game UI
+    if(IsKeyPressed(KEY_F)) env.gameState.isShowFPS = !env.gameState.isShowFPS; // inversion of previous state
+    if(IsKeyPressed(KEY_T)) env.isTraining = !env.isTraining;
+    if(IsKeyPressed(KEY_M)) env.isManual = !env.isManual;
+    if(IsKeyPressed(KEY_R)) env.reset();
+    
+    Rectangle AgentRect = {env.agent.x, env.agent.y, env.agent.w, env.agent.h};
+    Rectangle TargetRect = {env.target.x, env.target.y, env.target.w, env.target.h};
+    Rectangle SpikesRect[SPIKES_MAX] = {0};
 
-    bool isManual{true};    // Toggle manual vs. agent control
-    bool isTraining{false};  // Toggle training vs. evaluation
+    for(auto& spike: env.spikes){
+        spike.x += cos(spike.angle) * spike.speed * dt;
+        spike.y += sin(spike.angle) * spike.speed * dt;
 
-    PolicyMLP pol;          // Agent policy network
-
-    InitWindow(cfg.screenW, cfg.screenH, "Move to Goal");
-
-    int a{0};                              // Action
-    std::vector<Transition> traj;          // Episode trajectory (for REINFORCE)
-
-    // === Main Loop ===
-    while (!WindowShouldClose()){
-        // --- Keyboard Controls ---
-        if(IsKeyPressed(KEY_M)) isManual = !isManual;    // Toggle manual/auto
-        if(IsKeyPressed(KEY_T)) isTraining = !isTraining;// Toggle training/eval
-        if(IsKeyPressed(KEY_R)) { env.reset(); traj.clear(); } // Reset env+traj
-        if(IsKeyPressed(KEY_S)) { pol.save("policy.bin");}
-        if(IsKeyPressed(KEY_L)) { pol.load("policy.bin");}
-
-        // --- Agent Perception (forward pass) ---
-        VectorXf s = env.observe();  // Current state
-        VectorXf h, logits, probs;
-        pol.forward(s, h, logits, probs);
-
-        // --- Action Selection ---
-        if (isManual){
-            a = manualControl(env);  // Human control
+        if(!env.isSpikeStable){
+            spike.speed += dt * 3; //increase speed with time
+            spike.speed = min(spike.speed, 1000.f);
         }else{
-            a = pol.sampleAction(probs);  // Agent picks action
+            spike.speed = 50.f;
         }
 
-        // --- Environment Step ---
-        auto [r, done] = env.step(a);
-
-        // --- Training Logic ---
-        if (isTraining){
-            // Save transition for Monte Carlo update
-            traj.push_back({s, logits, h, a, r});
-
-            // If episode ends → update policy
-            if (env.steps >= cfg.maxSteps || done){
-                pol.update(traj);   // REINFORCE update
-                env.reset();        // Start new episode
-                traj.clear();       // Clear trajectory
-            }
-        }else{
-            // Evaluation mode → just reset on episode end
-            if (env.steps >= cfg.maxSteps || done) { env.reset(); traj.clear(); }
-        }
-
-        // --- Rendering ---
-        BeginDrawing();
-        ClearBackground(LIGHTBLACK);
-
-        // UI overlays
-        DrawText(isManual ? "MANUAL" : "AUTO", 140, 10, 20, isManual ? ORANGE : DARKGRAY);
-        DrawText(isTraining ? "TRAIN" : "EVAL", 240, 10, 20, isTraining ? ORANGE : DARKGRAY);
-        DrawText("M: toggle manual | T: toggle training | R: reset | S: save | R: load | ESC: quit",10, 390, 18, DARKGRAY);
-        float dist = std::fabs(env.playerX - env.targetX);
-        DrawText(TextFormat("dist: %.1f", dist), 10, 86, 18, RED);
-        DrawText(TextFormat("steps: %d/%d", (int)env.steps, cfg.maxSteps), 10, 64, 18, RED);
-        int bx = cfg.screenW - 200; int by = 20; int bw = 24; int gap = 6;
-        DrawText("pi(a/s):", bx, by, 20, DARKGRAY);
-        const char* labels[3] = {"LEFT", "IDLE", "RIGHT"};
-        for(int i=0; i < 3; ++i){
-            int hbar = (int)(probs[i] * 100); //Calculates the horizontal width of each bar
-            DrawRectangle(bx, by+30+i*(bw+gap), hbar, bw, i==a? ORANGE: DARKBLUE); //Draws a rectangle at position
-            DrawText(TextFormat("%s %.2f", labels[i], probs[i]), bx + hbar + 8, by+30+i*(bw+gap)+4, 18, DARKGRAY); // Draws text showing the label and probability value
-        }
-
-        // Scene rendering
-        DrawLine(0, cfg.screenH/2, cfg.screenW, cfg.screenH/2, LIGHTGRAY);
-        DrawRectangle((int)env.playerX, cfg.screenH/2 - cfg.targetW/2, cfg.playerW, cfg.targetW, LIGHTBLUE);
-        DrawRectangle((int)env.targetX, cfg.screenH/2 - cfg.targetW/2, cfg.targetW, cfg.targetW, RED);
+        // Screen wrapping spikes
+        if(spike.x > WIDTH) spike.x = 0.f;
+        if(spike.x < 0) spike.x = WIDTH;
+        if(spike.y > HEIGHT - SCREEN_OFFSET_BOT) spike.y = (float)SCREEN_OFFSET_TOP;
+        if(spike.y < SCREEN_OFFSET_TOP) spike.y =(float)(HEIGHT - SCREEN_OFFSET_BOT);
         
-        EndDrawing();
+        Rectangle SpikesRect = {spike.x, spike.y, spike.w, spike.h};
+        
+        // Collision agent x spikes
+        if (CheckCollisionRecs(AgentRect, SpikesRect)){
+            env.elapsedTime = 0.f;
+            env.reset();
+        }   
+        // Collsion target x spikes
+        if (CheckCollisionRecs(TargetRect, SpikesRect)) {
+            env.target.x = GetRandomValue(SCREEN_OFFSET_TOP, WIDTH);
+            env.target.y = GetRandomValue(SCREEN_OFFSET_TOP, HEIGHT - SCREEN_OFFSET_BOT);
+        }
     }
 
-    // === Cleanup ===
-    CloseWindow();
+    // Collsion agent x target
+    if (CheckCollisionRecs(AgentRect, TargetRect)){
+        env.target.x = GetRandomValue(SCREEN_OFFSET_TOP, WIDTH);
+        env.target.y = GetRandomValue(SCREEN_OFFSET_TOP, HEIGHT - SCREEN_OFFSET_BOT);
+        env.agent.score +=1 ;
+        env.isSpikeStable = true;   
+    }else{
+        env.isSpikeStable = false;
+    }
+   
+    // Screen wrapping agent
+    if(env.agent.x > WIDTH) env.agent.x = 0.f;
+    if(env.agent.x < 0) env.agent.x = WIDTH;
+    if(env.agent.y > HEIGHT - SCREEN_OFFSET_BOT) env.agent.y = (float)SCREEN_OFFSET_TOP;
+    if(env.agent.y < SCREEN_OFFSET_TOP) env.agent.y =(float)(HEIGHT - SCREEN_OFFSET_BOT);
+
+    // Observe
+    if(env.isManual){
+        a = pol.imitationAction();
+    }else{
+        a = pol.randomAction();
+    }
+    
+    // Act
+    env.step(a, dt);
+    
+    DrawFrame();       
+}
+
+
+int main(void){
+
+    InitWindow(WIDTH, HEIGHT, "QUANTUM");    
+    env.initGame();
+
+    while(!WindowShouldClose()){
+        float dt = GetFrameTime();
+        Update(dt);
+    }
+
     return 0;
 }
