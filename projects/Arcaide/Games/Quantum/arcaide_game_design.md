@@ -24,15 +24,32 @@ MPD: (s, a, r, T, a', pi, gamma)
 Rollout: (s, a, r, a')
 Return: G = SIGMA(gamma*r)
 Bellman: Gt = SIGMA(r + gamma*G_t+1)
-Forward: z(l) = W(l)y(l-1)
+Forwards: v(l) = W(l)*y(l-1)
+Activation: z(l) = phi(v(l))
 Loss: J'(L) = SIGMA(log pol * Gt)'
 Backward:
     dW(L) = J'(L) * z'(L)
-	 dW(l) = dW(L)*W(L)T (.) y(l)
+	dW(l) = dW(L)*W(L)T (.) y(l)
 Gradient: L'/W' = dW(l) * y(l-1)T
 Update:
     w(L) = w(L) + lRate.dW(L)
 	w(l) = w(l) + lRate.dW(l)
+
+algorithm gradient of policy:
+    1. initialize grad_W1, grad_W2, grad_b1, grad_b2
+    2. loop over transitions
+    2.2 d_logits = (onehot - probs) * G[t];
+    2.3	grad_W2 += d_logits * z1.T
+    2.4	grad_b2 += d_logits
+    2.5	d_hidden = W2.T * d_logits * relu`(h1)
+    2.6	grad_W1 += d_hidden * x.T
+    2.7	grad_b1 += d_hidden
+    3. update rule
+    3.1 W2 += alpha * grad_W2; b2 += alpha * grad_b2
+    3.2 W1 += alpha * grad_W1; b1 += alpha * grad_b1
+
+    Remember:
+    error_for_z1_i = (d_logit_0 * W2_0i) + (d_logit_1 * W2_1i) + (d_logit_2 * W2_2i) + ...
 
 -------------- Features Design ----------------
 fixed-based-features:
