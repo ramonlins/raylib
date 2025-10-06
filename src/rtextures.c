@@ -592,11 +592,10 @@ Image LoadImageFromTexture(Texture2D texture)
 // Load image from screen buffer and (screenshot)
 Image LoadImageFromScreen(void)
 {
-    Vector2 scale = GetWindowScaleDPI();
     Image image = { 0 };
 
-    image.width = (int)(GetScreenWidth()*scale.x);
-    image.height = (int)(GetScreenHeight()*scale.y);
+    image.width = (int)(GetRenderWidth());
+    image.height = (int)(GetRenderHeight());
     image.mipmaps = 1;
     image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
     image.data = rlReadScreenPixels(image.width, image.height);
@@ -702,7 +701,7 @@ bool ExportImage(Image image, const char *fileName)
         result = SaveFileData(fileName, image.data, GetPixelDataSize(image.width, image.height, image.format));
     }
     else TRACELOG(LOG_WARNING, "IMAGE: Export image format requested not supported");
-    
+
     if (allocatedData) RL_FREE(imgData);
 #endif      // SUPPORT_IMAGE_EXPORT
 
@@ -812,8 +811,8 @@ Image GenImageColor(int width, int height, Color color)
         .data = pixels,
         .width = width,
         .height = height,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-        .mipmaps = 1
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
     };
 
     return image;
@@ -864,8 +863,8 @@ Image GenImageGradientLinear(int width, int height, int direction, Color start, 
         .data = pixels,
         .width = width,
         .height = height,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-        .mipmaps = 1
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
     };
 
     return image;
@@ -901,8 +900,8 @@ Image GenImageGradientRadial(int width, int height, float density, Color inner, 
         .data = pixels,
         .width = width,
         .height = height,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-        .mipmaps = 1
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
     };
 
     return image;
@@ -950,8 +949,8 @@ Image GenImageGradientSquare(int width, int height, float density, Color inner, 
         .data = pixels,
         .width = width,
         .height = height,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-        .mipmaps = 1
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
     };
 
     return image;
@@ -975,8 +974,8 @@ Image GenImageChecked(int width, int height, int checksX, int checksY, Color col
         .data = pixels,
         .width = width,
         .height = height,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-        .mipmaps = 1
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
     };
 
     return image;
@@ -998,8 +997,8 @@ Image GenImageWhiteNoise(int width, int height, float factor)
         .data = pixels,
         .width = width,
         .height = height,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-        .mipmaps = 1
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
     };
 
     return image;
@@ -1049,8 +1048,8 @@ Image GenImagePerlinNoise(int width, int height, int offsetX, int offsetY, float
         .data = pixels,
         .width = width,
         .height = height,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-        .mipmaps = 1
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
     };
 
     return image;
@@ -1114,8 +1113,8 @@ Image GenImageCellular(int width, int height, int tileSize)
         .data = pixels,
         .width = width,
         .height = height,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-        .mipmaps = 1
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
     };
 
     return image;

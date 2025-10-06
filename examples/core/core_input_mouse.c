@@ -1,6 +1,6 @@
 /*******************************************************************************************
 *
-*   raylib [core] example - mouse input
+*   raylib [core] example - input mouse
 *
 *   Example complexity rating: [★☆☆☆] 1/4
 *
@@ -25,7 +25,7 @@ int main(void)
     const int screenWidth = 800;
     const int screenHeight = 450;
 
-    InitWindow(screenWidth, screenHeight, "raylib [core] example - mouse input");
+    InitWindow(screenWidth, screenHeight, "raylib [core] example - input mouse");
 
     Vector2 ballPosition = { -100.0f, -100.0f };
     Color ballColor = DARKBLUE;
@@ -72,7 +72,7 @@ int main(void)
             DrawText("move ball with mouse and click mouse button to change color", 10, 10, 20, DARKGRAY);
             DrawText("Press 'H' to toggle cursor visibility", 10, 30, 20, DARKGRAY);
 
-            if (!IsCursorHidden()) DrawText("CURSOR HIDDEN", 20, 60, 20, RED);
+            if (IsCursorHidden()) DrawText("CURSOR HIDDEN", 20, 60, 20, RED);
             else DrawText("CURSOR VISIBLE", 20, 60, 20, LIME);
 
         EndDrawing();
