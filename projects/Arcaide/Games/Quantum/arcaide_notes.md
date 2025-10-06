@@ -117,4 +117,3 @@ This **matrix framework** enables efficient, scalable computation and clear code
 <div style="text-align: center">⁂</div>
 
 [^1]: Screenshot-from-2025-09-14-09-08-49.jpg
-
