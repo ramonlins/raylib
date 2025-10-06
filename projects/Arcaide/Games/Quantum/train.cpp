@@ -14,23 +14,23 @@ using Eigen::MatrixXf;using Eigen::VectorXf;
 using namespace std;
 
 #define UI_COLOR RED
-#define WIDTH 720               //1920 FHD
-#define HEIGHT 480              // 1080 FHD
-#define OFFSET 120
-#define EDGE_0FFSET 10
-#define SCREEN_OFFSET_TOP 100
-#define SCREEN_OFFSET_BOT 100
-#define VISUAL_SCALE 10.0f
-#define TEXT_SPACE 20           // vertical space between lines
+#define WIDTH 640                               //1920 FHD
+#define HEIGHT 360                              // 1080 FHD
+#define OFFSET (int)(WIDTH*0.0625)
+#define EDGE_0FFSET (int)(WIDTH*0.0104)
+#define SCREEN_OFFSET_TOP (int)(WIDTH*0.052)
+#define SCREEN_OFFSET_BOT (int)(WIDTH*0.052)
+#define VISUAL_SCALE (int)(WIDTH*0.0052)
+#define TEXT_SPACE (int)(WIDTH*0.0104)           // vertical space between lines
 #define SPIKE_MIN_SPEED 100.f
 #define SPIKE_MAX_SPEED 255.f
 #define SPIKE_W 15
 #define SPIKES_NEAREST_MAX 5
 #define SPIKES_MAX 17
-#define SPIKES_MIN 3
+#define SPIKES_MIN 5
 #define SPAWN_TIME 20.0f
-#define QUASAR_W 20             // agent width
-#define POSITRON_W 20           // target width
+#define QUASAR_W (int)(WIDTH*0.0104)             // agent width
+#define POSITRON_W (int)(WIDTH*0.0104)          // target width
 #define XDIM 4 + SPIKES_MIN * 5 // 4 (agent features) + 5 (spikes) * 5 (features by spike)
 
 constexpr const char* POLICY_PATH = "policy.bin";
@@ -193,31 +193,51 @@ struct Env {
     int maxScore{0};
     
     tuple<float, float, float, float> computeAgentMetrics(){
-        float nax = (agent.x / WIDTH) * 2.f - 1.f;
-        float nay = (agent.y / HEIGHT) * 2.f - 1.f;
-        float ntx = (target.x / WIDTH) * 2.f - 1.f;
-        float nty = (target.y / HEIGHT) * 2.f - 1.f;
+            // --- 1. Calculate shortest delta for each axis ---
+            float dx = abs(agent.x - target.x);
+            float shortest_dx = min(dx, (float)WIDTH - dx);
 
-        float relX = ntx - nax;     // [-2, 2]
-        float relY = nty - nay;
-        float dist = sqrt(relX*relX + relY*relY);   // sqrt(8) ~2.828
-        
-        float nrelX = relX / 2.f;
-        float nrelY = relY / 2.f; 
-        float nDist = dist / sqrt(8.f);
-        float nangle = atan2(nrelY, nrelX) / PI;
+            float dy = abs(agent.y - target.y);
+            float shortest_dy = min(dy, (float)HEIGHT - dy);
+
+            // --- 2. Determine the direction for the angle ---
+            // We need to know whether the shortest path is direct or wrapped to get the correct angle.
+            float relX = target.x - agent.x;
+            if (abs(relX) > WIDTH / 2.0f) {
+                relX = (relX > 0)? relX - WIDTH : relX + WIDTH;
+            }
+
+            float relY = target.y - agent.y;
+            if (abs(relY) > HEIGHT / 2.0f) {
+                relY = (relY > 0)? relY - HEIGHT : relY + HEIGHT;
+            }
+
+            // --- 3. Calculate toroidal distance and normalize features ---
+            float dist = sqrt(shortest_dx*shortest_dx + shortest_dy*shortest_dy);
+            
+            // Normalize features to [-1, 1] or 
+            float nrelX = relX / (WIDTH / 2.0f);
+            float nrelY = relY / (HEIGHT / 2.0f);
+            
+            // Max possible toroidal distance is the diagonal of a screen folded in half
+            float max_toroidal_dist = sqrt(pow(WIDTH / 2.0f, 2) + pow(HEIGHT / 2.0f, 2));
+            float nDist = dist / max_toroidal_dist;
+            
+            float nangle = atan2(nrelY, nrelX) / PI;
         
         return {nrelX, nrelY, nDist, nangle};
     }
 
     VectorXf observe() {
         vector<float> data;
-        data.reserve(4 + SPIKES_MIN * 5); // Assuming STATE_DIM is correctly defined
+        data.reserve(4 + SPIKES_NEAREST_MAX * 5); // Corrected reserve size
 
         auto [relX_t, relY_t, dist_t, angle_t] = computeAgentMetrics();
         
         debugInfo.relPosAgentTargetX = relX_t;
         debugInfo.relPosAgentTargetY = relY_t;
+        // Store the unnormalized toroidal distance for debugging
+        float max_toroidal_dist = sqrt(pow(WIDTH / 2.0f, 2) + pow(HEIGHT / 2.0f, 2));
         debugInfo.distAgentTarget = dist_t;
         debugInfo.angleAgentTarget = angle_t;
 
@@ -231,43 +251,57 @@ struct Env {
         };
         vector<SpikeInfo> nearest_spike_features;
 
-        float nax = (agent.x / WIDTH) * 2.f - 1.f;
-        float nay = (agent.y / HEIGHT) * 2.f - 1.f;
-
+        // --- START: CORRECTED SPIKE DISTANCE CALCULATION ---
         vector<pair<float, int>> spike_distances;
         for(int i = 0; i < spikes.size(); i++) {
-            float nsx = (spikes[i].x / WIDTH) * 2.f - 1.f;
-            float nsy = (spikes[i].y / HEIGHT) * 2.f - 1.f;
-            float relX_s = nsx - nax;
-            float relY_s = nsy - nay;
-            float dist = sqrt(relX_s*relX_s + relY_s*relY_s) / sqrt(8.f);
-            spike_distances.push_back({dist, i});
+            // Calculate toroidal distance for each spike
+            float dx = abs(agent.x - spikes[i].x);
+            float shortest_dx = min(dx, (float)WIDTH - dx);
+
+            float dy = abs(agent.y - spikes[i].y);
+            float shortest_dy = min(dy, (float)HEIGHT - dy);
+
+            float toroidal_dist = sqrt(shortest_dx*shortest_dx + shortest_dy*shortest_dy);
+            spike_distances.push_back({toroidal_dist, i});
         }
+        // --- END: CORRECTED SPIKE DISTANCE CALCULATION ---
 
         sort(spike_distances.begin(), spike_distances.end());
 
         for (int i = 0; i < SPIKES_NEAREST_MAX; i++) {
             if (i < spike_distances.size()) {
                 const auto& spike = spikes[spike_distances[i].second];
-                float nsx = (spike.x / WIDTH) * 2.f - 1.f;
-                float nsy = (spike.y / HEIGHT) * 2.f - 1.f;
-                float nSpeed = (spike.speed / SPIKE_MAX_SPEED);
-                float nDist = spike_distances[i].first;
-                float nrelX = (nsx - nax)/ 2.f;
-                float nrelY = (nsy - nay)/2.f; 
+
+                // --- START: CORRECTED SPIKE FEATURE CALCULATION ---
+                // Calculate the shortest relative position vector to get the correct direction/angle
+                float relX_s = spike.x - agent.x;
+                if (abs(relX_s) > WIDTH / 2.0f) {
+                    relX_s = (relX_s > 0)? relX_s - WIDTH : relX_s + WIDTH;
+                }
+                float relY_s = spike.y - agent.y;
+                if (abs(relY_s) > HEIGHT / 2.0f) {
+                    relY_s = (relY_s > 0)? relY_s - HEIGHT : relY_s + HEIGHT;
+                }
+
+                // Normalize all features consistently
+                float nrelX = relX_s / (WIDTH / 2.0f);
+                float nrelY = relY_s / (HEIGHT / 2.0f);
+                float nSpeed = spike.speed / SPIKE_MAX_SPEED;
+                float nDist = spike_distances[i].first / max_toroidal_dist;
                 float nAngle = atan2(nrelY, nrelX) / PI;
+                // --- END: CORRECTED SPIKE FEATURE CALCULATION ---
 
                 debugInfo.nearestSpikes[i] = Spike{
-                    spike.x, // keep it to visual tracking
-                    spike.y, // keep it to visual tracking
-                    nSpeed,
-                    spike.w,
+                    spike.x, 
+                    spike.y, 
+                    nSpeed, 
+                    spike.w, 
                     spike.h,
-                    nDist,
-                    spike.distTarget,
-                    nAngle,
-                    spike.angleTarget,
-                    true // isActive (default value)
+                    nDist, 
+                    spike.distTarget, 
+                    nAngle, 
+                    spike.angleTarget, 
+                    true
                 };
 
                 nearest_spike_features.push_back({
@@ -278,7 +312,6 @@ struct Env {
                     nAngle
                 });
             } else {
-                // Add empty features if not enough spikes
                 nearest_spike_features.push_back({0.f, 0.f, 0.f, 0.f, 0.f});
             }
         }
@@ -290,9 +323,6 @@ struct Env {
             data.push_back(features.dist);
             data.push_back(features.angle);
         }
-
-        // --- 3. Difficulty Feature ---
-        //data.push_back((float)spikes.size() / (float)SPIKES_MAX);
         
         return Eigen::Map<VectorXf>(data.data(), data.size());
     }
@@ -575,25 +605,61 @@ void DrawFrame(){
     BeginDrawing();
         
         ClearBackground(BLACK);
-        // UI TOP
-        //DrawText("QUANTUM FIELD", WIDTH/2 - 120, 10, 30, RED);
-        DrawText(env.isManual ? "MANUAL" : "AUTO", 140, 10, 15, env.isManual ? LIGHTGRAY : DARKGRAY);
-        DrawText(env.isTraining ? "TRAIN" : "EVAL", 240, 10, 15, env.isTraining ? LIGHTGRAY : DARKGRAY);
-        DrawText(TextFormat("TIME: %.2f", env.elapsedTime), EDGE_0FFSET, EDGE_0FFSET, 15, UI_COLOR);
-        DrawText(TextFormat("SCORE: %d", env.agent.score), EDGE_0FFSET, EDGE_0FFSET+20, 15, UI_COLOR);
-        DrawText(TextFormat("MAX SCORE: %d", env.maxScore), WIDTH/1.2 - OFFSET, EDGE_0FFSET, 15, UI_COLOR);
-        DrawText(TextFormat("NUM OF SPIKES: %d", env.spikes.size()), WIDTH/1.2 - OFFSET, EDGE_0FFSET+20, 15, UI_COLOR);
-        if(env.game.isShowFPS) DrawText(TextFormat("FPS: %d", GetFPS()), WIDTH-EDGE_0FFSET-70, EDGE_0FFSET, 15, DARKGRAY);
-        // UI DOWN
-        DrawText("M: toggle manual | T: toggle training | F: enable/disable fps | R: reset | K: save | L: load | TAB: debug | ESC: quit", EDGE_0FFSET, HEIGHT-40, 10, DARKGRAY);
-        // DrawText("Objective: Stabilize the Quantum Field", WIDTH/1.6, HEIGHT-SCREEN_OFFSET_TOP+50, 10, DARKGRAY);
-        // DrawText("Controls: Arrow Keys / WASD to move in all directions", WIDTH/1.6, HEIGHT-SCREEN_OFFSET_TOP+60, 10, DARKGRAY);
-        // DrawText("Hint: Diagonal movement is faster", WIDTH/1.6, HEIGHT-SCREEN_OFFSET_TOP+70, 10, DARKGRAY);
-        // DrawText("Rules:", WIDTH/1.2, HEIGHT-SCREEN_OFFSET_TOP+50, 10, DARKGRAY);
-        // DrawText("- Collect RED energy (core for stabilization)",WIDTH/1.2 , HEIGHT-SCREEN_OFFSET_TOP+60, 10, DARKGRAY);
-        // DrawText("- Avoid PURPLE SPIKES (they destroy energy)",WIDTH/1.2 , HEIGHT-SCREEN_OFFSET_TOP+70, 10, DARKGRAY);
-        // DrawText("- Balance movement to keep control of the field",WIDTH/1.2 , HEIGHT-SCREEN_OFFSET_TOP+80, 10, DARKGRAY);
-        // DrawText("\xC2\xA9 ARCAIDE", WIDTH/2 - 60, HEIGHT-SCREEN_OFFSET_TOP+50, 20, UI_COLOR);        
+        // 1. Define proportional font sizes based on a 1080p height.
+        //    (Original Size / 1080.0f)
+        int titleFontSize   = HEIGHT * 0.0278f; // Original: 30px
+        int mainFontSize    = HEIGHT * 0.0185f; // Original: 20px
+        int regularFontSize = HEIGHT * 0.0139f; // Original: 15px
+        int smallFontSize   = HEIGHT * 0.0049f; // Original: 10px
+
+        // 2. Define proportional spacing.
+        float topMargin       = HEIGHT * 0.0093f; // Original: 10px
+        float verticalSpacing = HEIGHT * 0.0185f; // Original: 20px
+
+        // --- TOP UI ---
+
+        // QUANTUM Title (positioned with a static offset from the center)
+        DrawText("QUANTUM", WIDTH * 0.463f, topMargin, titleFontSize, UI_COLOR); // Center - 80px
+
+        // Mode Indicators
+        //DrawText(env.isManual ? "MANUAL" : "AUTO", WIDTH * 0.073f, topMargin, regularFontSize, env.isManual ? LIGHTGRAY : DARKGRAY); // 140px
+        //DrawText(env.isTraining ? "TRAIN" : "EVAL", WIDTH * 0.125f, topMargin, regularFontSize, env.isTraining ? LIGHTGRAY : DARKGRAY); // 240px
+
+        // Left-side Stats (TIME, SCORE)
+        DrawText(TextFormat("TIME: %.2f", env.elapsedTime), EDGE_0FFSET, topMargin, regularFontSize, UI_COLOR);
+        DrawText(TextFormat("SCORE: %d", env.agent.score), EDGE_0FFSET, topMargin + verticalSpacing, regularFontSize, UI_COLOR);
+
+        // Right-side Stats (MAX SCORE, NUM OF SPIKES)
+        // NOTE: This uses your original formula, which is already proportional.
+        DrawText(TextFormat("MAX SCORE: %d", env.maxScore), WIDTH/1.2f - OFFSET, topMargin, regularFontSize, UI_COLOR);
+        //DrawText(TextFormat("NUM OF SPIKES: %zu", env.spikes.size()), WIDTH/1.2f - OFFSET, topMargin + verticalSpacing, regularFontSize, UI_COLOR);
+
+        // FPS Counter (positioned from the right edge with a static offset)
+        if(env.game.isShowFPS) DrawText(TextFormat("FPS: %d", GetFPS()), WIDTH - EDGE_0FFSET*4, topMargin, regularFontSize, DARKGRAY); // 70px offset
+
+        // --- BOTTOM UI ---
+
+        // Controls Hint Bar
+        //DrawText("M: manual | T: train | F: fps | R: reset | K: save | L: load | TAB: debug | ESC: quit",
+        //        EDGE_0FFSET, HEIGHT * 0.92f, smallFontSize, DARKGRAY); // 40px from bottom
+
+        // Instructions Section
+        float footerStartY    = HEIGHT * 0.92f;   // Base Y position for the footer
+        float footerLineHeight = HEIGHT * 0.013f;  // Space between lines in the footer
+
+        // Left Column
+        // DrawText("Objective: Stabilize the Quantum Field", WIDTH * 0.6f, footerStartY, smallFontSize, DARKGRAY); // 1200px
+        // DrawText("Controls: Arrow Keys / WASD to move in all directions", WIDTH * 0.6f, footerStartY + footerLineHeight, smallFontSize, DARKGRAY);
+        // DrawText("Hint: Diagonal movement is faster", WIDTH * 0.6f, footerStartY + footerLineHeight * 2, smallFontSize, DARKGRAY);
+
+        // // Right Column
+        // DrawText("Rules:", WIDTH * 0.833f, footerStartY, smallFontSize, DARKGRAY); // 1600px
+        // DrawText("- Collect RED energy (core for stabilization)", WIDTH * 0.833f, footerStartY + footerLineHeight, smallFontSize, DARKGRAY);
+        // DrawText("- Avoid PURPLE SPIKES (they destroy energy)", WIDTH * 0.833f, footerStartY + footerLineHeight * 2, smallFontSize, DARKGRAY);
+        // DrawText("- Balance movement to keep control of the field", WIDTH * 0.833f, footerStartY + footerLineHeight * 3, smallFontSize, DARKGRAY);
+
+        // Copyright Text
+        DrawText("\xC2\xA9 ARCAIDE", WIDTH * 0.468f, HEIGHT * 0.93f, mainFontSize, UI_COLOR); // Center - 60px 
         
         // UI DEBUG
         if(env.game.isDebug) {
@@ -767,7 +833,7 @@ void Update(float dt){
             // Collision agent x spikes
             if (CheckCollisionRecs(AgentRect, SpikesRect)){
                 env.elapsedTime = 0.f;
-                reward = -0.1f;
+                reward = -1.f;
                 isDone = true;
             }   
             
@@ -868,26 +934,39 @@ void Update(float dt){
             if(env.isSpikeStable){
                 env.stabilizeSpikes();
             }
+
+            if(hasFileBeenModified("policy.bin")){
+                pol.load("policy.bin");
+                cout << "Load new policy !" << endl;
+            }
         }
 
         DrawFrame();
     }
 }
 
+float fixed_timestep (1.f / 60.f);
+
 int main(void){
 
     InitWindow(WIDTH, HEIGHT, "QUANTUM");
     //ToggleBorderlessWindowed();
     //ToggleFullscreen();           // switch to fullscreen mode
-    SetTargetFPS(165);
+    //SetTargetFPS(60);
     env.initGame();
-    env.loadTextures();
+    env.loadTextures(); 
     
     pol.load("policy.bin");
-    
+    bool isRenderMode{true};
     while(!WindowShouldClose()){
-        float dt = GetFrameTime();
-        Update(dt);
+        if(IsKeyPressed(KEY_SPACE)) isRenderMode = !isRenderMode;   
+        
+        if(!isRenderMode){
+            Update(fixed_timestep);
+        }else{
+            float dt = GetFrameTime();
+            Update(dt);
+        }
     }
 
     env.unloadTextures();
