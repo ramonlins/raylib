@@ -14,26 +14,24 @@ using Eigen::MatrixXf;using Eigen::VectorXf;
 using namespace std;
 
 #define UI_COLOR RED
-#define WIDTH 640                                                  //1920 FHD
-#define HEIGHT 320                                                 //1080 FHD
-#define SCREEN_OFFSET_TOP (int)(WIDTH*0.052)
-#define SCREEN_OFFSET_BOT (int)(WIDTH*0.052)
+#define WIDTH 1920                               //1920 FHD
+#define HEIGHT 1080                              // 1080 FHD
 #define OFFSET (int)(WIDTH*0.0625)
 #define EDGE_0FFSET (int)(WIDTH*0.0104)
-#define VISUAL_SCALE 10
-#define TEXT_SPACE (int)(WIDTH*0.0104)                              // vertical space between lines
+#define SCREEN_OFFSET_TOP (int)(WIDTH*0.052)
+#define SCREEN_OFFSET_BOT (int)(WIDTH*0.052)
+#define VISUAL_SCALE (int)(WIDTH*0.0052)
+#define TEXT_SPACE (int)(WIDTH*0.0104)           // vertical space between lines
 #define SPIKE_MIN_SPEED 100.f
 #define SPIKE_MAX_SPEED 255.f
-#define SPIKE_W 15
+#define SPIKE_W (int)(WIDTH*0.0104)
 #define SPIKES_NEAREST_MAX 5
 #define SPIKES_MAX 17
-#define SPIKES_MIN 0
+#define SPIKES_MIN 100
 #define SPAWN_TIME 20.0f
-#define QUASAR_W 20                               // agent width
-#define POSITRON_W 20                              // target width
-#define XDIM 4                                                      // relPos, absPos
-
-int HEIGHT_PAD = HEIGHT - SCREEN_OFFSET_TOP - SCREEN_OFFSET_BOT;    // 1080 FHD
+#define QUASAR_W (int)(WIDTH*0.0104)             // agent width
+#define POSITRON_W (int)(WIDTH*0.0104)          // target width
+#define XDIM 4                                  // relPos, absPos
 
 constexpr const char* POLICY_PATH = "policy.bin";
 
@@ -193,7 +191,7 @@ struct Env {
     
     tuple<float, float, float, float> computeAgentMetrics(){
         float flatTorusW = WIDTH/2;
-        float flatTorusH = HEIGHT_PAD/2;
+        float flatTorusH = HEIGHT/2;
         float relX;
         float relY;
 
@@ -210,9 +208,9 @@ struct Env {
         float deltaY = target.y - agent.y;
         
         if(deltaY > flatTorusH){
-            relY = deltaY - HEIGHT_PAD;
+            relY = deltaY - HEIGHT;
         } else if (deltaY < -flatTorusH){
-            relY = HEIGHT_PAD + deltaY;    
+            relY = HEIGHT + deltaY;    
         }else{
             relY = deltaY;
         }
@@ -220,8 +218,11 @@ struct Env {
         // convert xy to cycle space
         float fRelXx = cos(2*PI*relX/WIDTH);
         float fRelXy = sin(2*PI*relX/WIDTH);        
-        float fRelYx = sin(2*PI*relY/HEIGHT_PAD);
-        float fRelYy = cos(2*PI*relY/HEIGHT_PAD);
+        float fRelYx = cos(2*PI*relY/HEIGHT);
+        float fRelYy = sin(2*PI*relY/HEIGHT);
+
+        // float nPosX = (target.x / WIDTH) * 2.f - 1.f;
+        // float nPosY = (target.y / HEIGHT) * 2.f - 1.f;
 
         return {fRelXx, fRelXy, fRelYx, fRelYy};
     }
@@ -267,7 +268,7 @@ struct Env {
     }
     
     void initGame(void){
-        //maxScore = LoadMaxScore("max_score.txt");
+        maxScore = LoadMaxScore("max_score.txt");
         agent.x = (float)GetRandomValue(SCREEN_OFFSET_TOP, WIDTH);
         agent.y = (float)GetRandomValue(SCREEN_OFFSET_TOP, HEIGHT - SCREEN_OFFSET_BOT);
 
@@ -560,26 +561,26 @@ void DrawFrame(){
         // --- BOTTOM UI ---
 
         // Controls Hint Bar
-        //DrawText("M: manual | T: train | F: fps | R: reset | K: save | L: load | TAB: debug | ESC: quit",
-        //        EDGE_0FFSET, HEIGHT * 0.92f, smallFontSize, DARKGRAY); // 40px from bottom
+        DrawText("M: manual | T: train | F: fps | R: reset | K: save | L: load | TAB: debug | ESC: quit",
+               EDGE_0FFSET, HEIGHT * 0.94f, smallFontSize, DARKGRAY); // 40px from bottom
 
         // Instructions Section
-        float footerStartY    = HEIGHT * 0.92f;   // Base Y position for the footer
+        float footerStartY    = HEIGHT * 0.94f;   // Base Y position for the footer
         float footerLineHeight = HEIGHT * 0.013f;  // Space between lines in the footer
 
         // Left Column
-        // DrawText("Objective: Stabilize the Quantum Field", WIDTH * 0.6f, footerStartY, smallFontSize, DARKGRAY); // 1200px
-        // DrawText("Controls: Arrow Keys / WASD to move in all directions", WIDTH * 0.6f, footerStartY + footerLineHeight, smallFontSize, DARKGRAY);
-        // DrawText("Hint: Diagonal movement is faster", WIDTH * 0.6f, footerStartY + footerLineHeight * 2, smallFontSize, DARKGRAY);
+        DrawText("Objective: Stabilize the Quantum Field", WIDTH * 0.6f, footerStartY, smallFontSize, DARKGRAY); // 1200px
+        DrawText("Controls: Arrow Keys / WASD to move in all directions", WIDTH * 0.6f, footerStartY + footerLineHeight, smallFontSize, DARKGRAY);
+        DrawText("Hint: Diagonal movement is faster", WIDTH * 0.6f, footerStartY + footerLineHeight * 2, smallFontSize, DARKGRAY);
 
-        // // Right Column
-        // DrawText("Rules:", WIDTH * 0.833f, footerStartY, smallFontSize, DARKGRAY); // 1600px
-        // DrawText("- Collect RED energy (core for stabilization)", WIDTH * 0.833f, footerStartY + footerLineHeight, smallFontSize, DARKGRAY);
-        // DrawText("- Avoid PURPLE SPIKES (they destroy energy)", WIDTH * 0.833f, footerStartY + footerLineHeight * 2, smallFontSize, DARKGRAY);
-        // DrawText("- Balance movement to keep control of the field", WIDTH * 0.833f, footerStartY + footerLineHeight * 3, smallFontSize, DARKGRAY);
+        // Right Column
+        DrawText("Rules:", WIDTH * 0.833f, footerStartY, smallFontSize, DARKGRAY); // 1600px
+        DrawText("- Collect RED energy (core for stabilization)", WIDTH * 0.833f, footerStartY + footerLineHeight, smallFontSize, DARKGRAY);
+        DrawText("- Avoid PURPLE SPIKES (they destroy energy)", WIDTH * 0.833f, footerStartY + footerLineHeight * 2, smallFontSize, DARKGRAY);
+        DrawText("- Balance movement to keep control of the field", WIDTH * 0.833f, footerStartY + footerLineHeight * 3, smallFontSize, DARKGRAY);
 
         // Copyright Text
-        DrawText("\xC2\xA9 ARCAIDE", WIDTH * 0.468f, HEIGHT * 0.93f, mainFontSize, UI_COLOR); // Center - 60px 
+        DrawText("\xC2\xA9 ARCAIDE", WIDTH * 0.468f, HEIGHT * 0.95f, mainFontSize, UI_COLOR); // Center - 60px 
         
         // UI DEBUG
         if(env.game.isDebug) {
@@ -658,12 +659,11 @@ void Update(float dt){
     float reward{0.f};
     bool isDone{false}, isTerminated{false};
     static vector<Env::Transition> traj{};
-    // NOTE: RESET BY TIME
+    
     env.elapsedTime+=dt;
-    if(env.elapsedTime - env.lastSpawn > 3.f){
+    if(env.elapsedTime - env.lastSpawn > 60.f){
         env.lastSpawn = env.elapsedTime;
-        //isTerminated = true;
-        isDone = true;
+        isTerminated = true;
     }
     
     // spawn 5 spikes after 30s
@@ -728,11 +728,11 @@ void Update(float dt){
             Rectangle SpikesRect = {spike.x, spike.y, spike.w, spike.h};
             
             // Collision agent x spikes
-            // if (CheckCollisionRecs(AgentRect, SpikesRect)){
-            //     //env.elapsedTime = 0.f;
-            //     //reward = -1.f;
-            //     isDone = true;
-            // }   
+            if (CheckCollisionRecs(AgentRect, SpikesRect)){
+                env.elapsedTime = 0.f;
+                reward = -1.f;
+                isDone = true;
+            }   
             
             // Collsion target x spikes
             if (CheckCollisionRecs(TargetRect, SpikesRect)) {
@@ -768,7 +768,7 @@ void Update(float dt){
         }else{
             //if(env.elapsedTime - env.lastSpawn > 10.f){
             env.isSpikeStable = false;
-            reward = -0.01f;
+            //reward = -(env.debugInfo.distAgentTarget)*0.01f + 0.01f;
             //reward = 0.f;
             //}
         }
@@ -847,18 +847,19 @@ float fixed_timestep (1.f / 60.f);
 int main(void){
     //SetTargetFPS(60);
 
-    InitWindow(WIDTH, HEIGHT, "QUANTUM");
+    InitWindow(WIDTH, HEIGHT, "QUANTUM STREAM");
+    DisableCursor();
     
     if(WIDTH == 1920){
-        ToggleBorderlessWindowed();
-        //ToggleFullscreen();
+        //ToggleBorderlessWindowed();
+        ToggleFullscreen();
     }
 
     env.initGame();
     env.loadTextures(); 
     
     pol.load("policy.bin");
-    bool isRenderMode{false};
+    bool isRenderMode{true};
     while(!WindowShouldClose()){
         if(IsKeyPressed(KEY_SPACE)) isRenderMode = !isRenderMode;   
         
